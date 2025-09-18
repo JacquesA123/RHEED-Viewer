@@ -1,0 +1,8 @@
+ECHO is on.
+
+*.npy
+*.log
+*.pyc
+
+venv/
+Acquiring Images Via Python Script Tests/
