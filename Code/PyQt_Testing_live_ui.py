@@ -13,9 +13,13 @@ import datetime
 import threading
 
 import numpy as np
+import collections
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
 from PyrometerControl import get_pyrometer_temperature, start_pyrometer
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 
 
 # Default save locations (replace with your actual paths)
@@ -84,22 +88,33 @@ class StreamSettingsDialog(QtWidgets.QDialog):
 # --------------------------------------------------------------------------------------
 # Window that shows the live RHEED feed (grayscale image)
 # --------------------------------------------------------------------------------------
+
+
 class LiveImageWindow(QtWidgets.QWidget):
-    def __init__(self,pyrometer_app, title="Live RHEED Feed", parent=None):
+    def __init__(self, pyrometer_app, title="Live RHEED Feed", parent=None):
         super().__init__(parent)
         self.pyrometer_app = pyrometer_app
+
         self.setWindowTitle(title)
-        self.setGeometry(200, 150, 900, 700)  # ← remove
-        layout = QtWidgets.QVBoxLayout(self)
+        self.resize(900, 700)  # use resize instead of setGeometry for a top-level
+
+        # --- Layout: create it WITHOUT a parent, then set once ---
+        layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.setLayout(layout)  # <-- only once
 
-        self.image_label = QtWidgets.QLabel(self)
+        # --- Image area ---
+        self.image_label = QtWidgets.QLabel()
         self.image_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
         self.image_label.setScaledContents(False)
-        self.image_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        self.image_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        layout.addWidget(self.image_label, stretch=2)
 
-        layout.addWidget(self.image_label)
+
+
 
 
     @QtCore.Slot(np.ndarray)
@@ -134,8 +149,7 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         self.image_label.setPixmap(pix)
         self.image_label.resize(pix.size())
-        self.resize(pix.size())         # window tracks image size
-
+        
 
 
 # --------------------------------------------------------------------------------------
@@ -580,7 +594,7 @@ class MyWidget(QtWidgets.QWidget):
 
 def main():
     pyrometer_app = start_pyrometer()
-    time.sleep(10)
+    time.sleep(5)
     print('finished setting up pyrometer')
     app = QtWidgets.QApplication(sys.argv)
     w = MyWidget(pyrometer_app)
