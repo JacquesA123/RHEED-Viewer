@@ -149,7 +149,81 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         self.image_label.setPixmap(pix)
         self.image_label.resize(pix.size())
-        
+
+
+
+# --------------------------------------------------------------------------------------
+# Window that shows a live intensity plot
+# --------------------------------------------------------------------------------------
+class LiveIntensityWindow(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Live Intensity Plot")
+        self.resize(600, 400)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        self._figure = Figure(tight_layout=True)
+        self._canvas = FigureCanvas(self._figure)
+        layout.addWidget(self._canvas)
+
+        self._axes = self._figure.add_subplot(111)
+        self._axes.set_title("Mean Intensity vs. Time")
+        self._axes.set_xlabel("Time (s)")
+        self._axes.set_ylabel("Mean Intensity")
+
+        self._line, = self._axes.plot([], [], color="#1f77b4")
+
+        self._times = collections.deque(maxlen=600)
+        self._values = collections.deque(maxlen=600)
+        self._t0 = None
+
+    def reset_data(self):
+        self._times.clear()
+        self._values.clear()
+        self._t0 = None
+        self._line.set_data([], [])
+        self._axes.relim()
+        self._axes.autoscale_view()
+        self._canvas.draw_idle()
+
+    @QtCore.Slot(np.ndarray)
+    def update_intensity(self, image_array: np.ndarray):
+        if image_array.size == 0:
+            return
+
+        now = time.time()
+        if self._t0 is None:
+            self._t0 = now
+
+        intensity = float(np.mean(image_array))
+        elapsed = now - self._t0
+
+        self._times.append(elapsed)
+        self._values.append(intensity)
+
+        self._line.set_data(self._times, self._values)
+
+        if self._times:
+            xmin = max(0.0, self._times[0])
+            xmax = max(elapsed, xmin + 1.0)
+            self._axes.set_xlim(xmin, xmax)
+
+        if self._values:
+            ymin = min(self._values)
+            ymax = max(self._values)
+            if abs(ymax - ymin) < 1e-6:
+                ymin -= 0.5
+                ymax += 0.5
+            self._axes.set_ylim(ymin, ymax)
+
+        self._canvas.draw_idle()
+
+    def closeEvent(self, event: QtGui.QCloseEvent):
+        # Keep the window available for reopening without re-instantiating
+        event.ignore()
+        self.hide()
 
 
 # --------------------------------------------------------------------------------------
@@ -351,6 +425,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire = QtWidgets.QPushButton("Acquire RHEED Image")
         self.btn_start_stream = QtWidgets.QPushButton("Start RHEED Stream")
         self.btn_stop_stream = QtWidgets.QPushButton("Stop RHEED Stream")
+        self.btn_show_intensity = QtWidgets.QPushButton("Show Intensity Plot")
 
         # Layout
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -360,11 +435,15 @@ class MyWidget(QtWidgets.QWidget):
         row.addWidget(self.btn_acquire)
         row.addWidget(self.btn_start_stream)
         row.addWidget(self.btn_stop_stream)
+        row.addWidget(self.btn_show_intensity)
         main_layout.addLayout(row)
 
         # Live preview window
         self.live_window = LiveImageWindow(self.pyrometer_app, title="Live RHEED Feed")
         self.live_window.hide()
+
+        self.intensity_window = LiveIntensityWindow()
+        self.intensity_window.hide()
 
         # State
         self.live_worker: LiveViewWorker | None = None
@@ -376,6 +455,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire.clicked.connect(self.acquire_single_image)
         self.btn_start_stream.clicked.connect(self.open_stream_dialog)
         self.btn_stop_stream.clicked.connect(self.stop_rheed_stream)
+        self.btn_show_intensity.clicked.connect(self.show_intensity_window)
 
         # Initial UI state
         self._set_initial_ui()
@@ -388,6 +468,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire.setVisible(False)
         self.btn_start_stream.setVisible(False)
         self.btn_stop_stream.setVisible(False)
+        self.btn_show_intensity.setVisible(False)
 
     def _set_live_ui(self):
         # After starting live: show stop + acquire + start-stream
@@ -396,6 +477,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire.setVisible(True)
         self.btn_start_stream.setVisible(True)
         self.btn_stop_stream.setVisible(False)
+        self.btn_show_intensity.setVisible(True)
 
     def _set_stream_running_ui(self):
         # While RHEED stream is actively saving
@@ -403,12 +485,20 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_stop_live.setEnabled(False)
         self.btn_start_stream.setVisible(False)
         self.btn_stop_stream.setVisible(True)
+        self.btn_show_intensity.setEnabled(True)
 
     def _set_stream_stopped_ui(self):
         # Stream stopped; back to live UI
         self.btn_stop_live.setEnabled(True)
         self.btn_start_stream.setVisible(True)
         self.btn_stop_stream.setVisible(False)
+        self.btn_show_intensity.setEnabled(True)
+
+    @QtCore.Slot()
+    def show_intensity_window(self):
+        self.intensity_window.show()
+        self.intensity_window.raise_()
+        self.intensity_window.activateWindow()
 
     # ----------------- Button handlers -----------------
     @QtCore.Slot()
@@ -425,7 +515,9 @@ class MyWidget(QtWidgets.QWidget):
         # Start live worker
         self.live_worker = LiveViewWorker(target_hz=30.0)
         self.live_worker.new_frame.connect(self.live_window.update_image)
+        self.live_worker.new_frame.connect(self.intensity_window.update_intensity)
         self.live_window.show()
+        self.intensity_window.reset_data()
         self.live_worker.start()
         print('starting live viewing stream')
         self._set_live_ui()
@@ -440,6 +532,7 @@ class MyWidget(QtWidgets.QWidget):
             self.live_worker.wait()
             self.live_worker = None
         self.live_window.hide()
+        self.intensity_window.hide()
         self._set_initial_ui()
         print('stopped live viewing stream')
 
@@ -458,6 +551,7 @@ class MyWidget(QtWidgets.QWidget):
         if not self.live_window.isVisible():
             self.live_window.show()
         worker.new_frame.connect(self.live_window.update_image)
+        worker.new_frame.connect(self.intensity_window.update_intensity)
 
     @QtCore.Slot()
     def start_rheed_stream(self, duration_s: float, freq_hz: float):
@@ -483,6 +577,7 @@ class MyWidget(QtWidgets.QWidget):
         self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder)
         self._connect_preview(self.stream_worker)
         self.stream_worker.finished.connect(self._on_stream_finished)
+        self.intensity_window.reset_data()
         self.stream_worker.start()
         self._set_stream_running_ui()
         print('started acquisition stream')
@@ -506,6 +601,7 @@ class MyWidget(QtWidgets.QWidget):
             self.live_worker = LiveViewWorker(target_hz=30.0)
             self._connect_preview(self.live_worker)
             self.live_worker.start()
+            self.intensity_window.reset_data()
         self._set_stream_stopped_ui()
 
     @QtCore.Slot()
