@@ -11,11 +11,14 @@ import time
 import os
 import datetime
 import threading
+import collections
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
 from PyrometerControl import get_pyrometer_temperature, start_pyrometer
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 
 # Default save locations (replace with your actual paths)
@@ -91,20 +94,30 @@ class LiveImageWindow(QtWidgets.QWidget):
         self.setGeometry(200, 150, 900, 700)  # ← remove
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(8)
 
         self.image_label = QtWidgets.QLabel(self)
         self.image_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
         self.image_label.setScaledContents(False)
-        self.image_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        self.image_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-        layout.addWidget(self.image_label)
+        layout.addWidget(self.image_label, stretch=1)
+
+        # Matplotlib canvas for intensity plot
+        self._figure = Figure(figsize=(5, 2))
+        self._canvas = FigureCanvas(self._figure)
+        self._axes = self._figure.add_subplot(111)
+        self._axes.set_title("Live Intensity")
+        self._axes.set_xlabel("Frame")
+        self._axes.set_ylabel("Mean Intensity")
+        self._axes.grid(True, linestyle="--", alpha=0.3)
+        self._intensity_history = collections.deque(maxlen=300)
+        (self._intensity_line,) = self._axes.plot([], [], color="tab:orange")
+        layout.addWidget(self._canvas, stretch=0)
 
 
     @QtCore.Slot(np.ndarray)
     def update_image(self, image_array: np.ndarray):
-        print(image_array.shape)
-        print(image_array.sum())
         pix = ndarray_to_pixmap(image_array)
 
         # --- draw timestamp (top-left) on the pixmap ---
@@ -132,7 +145,32 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         self.image_label.setPixmap(pix)
         self.image_label.resize(pix.size())
-        self.resize(pix.size())         # window tracks image size
+        self.adjustSize()
+
+        # --- update intensity plot ---
+        try:
+            intensity_value = float(np.mean(image_array))
+        except Exception:
+            intensity_value = 0.0
+
+        self._intensity_history.append(intensity_value)
+        if self._intensity_history:
+            x_data = np.arange(len(self._intensity_history))
+            y_data = np.array(self._intensity_history, dtype=float)
+            self._intensity_line.set_data(x_data, y_data)
+            self._axes.set_xlim(0, max(len(self._intensity_history) - 1, 1))
+            y_min = float(np.min(y_data))
+            y_max = float(np.max(y_data))
+            if y_max - y_min < 1e-6:
+                y_max = y_min + 1.0
+            padding = 0.05 * (y_max - y_min)
+            self._axes.set_ylim(y_min - padding, y_max + padding)
+        else:
+            self._intensity_line.set_data([], [])
+            self._axes.set_xlim(0, 1)
+            self._axes.set_ylim(0, 1)
+
+        self._canvas.draw_idle()
 
 
 
