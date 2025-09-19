@@ -19,8 +19,8 @@ from PyrometerControl import get_pyrometer_temperature, start_pyrometer
 
 
 # Default save locations (replace with your actual paths)
-single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Single Images")
-stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Stream Images")
+single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Single Images")
+stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Stream Images")
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
 
@@ -85,8 +85,9 @@ class StreamSettingsDialog(QtWidgets.QDialog):
 # Window that shows the live RHEED feed (grayscale image)
 # --------------------------------------------------------------------------------------
 class LiveImageWindow(QtWidgets.QWidget):
-    def __init__(self, title="Live RHEED Feed", parent=None):
+    def __init__(self,pyrometer_app, title="Live RHEED Feed", parent=None):
         super().__init__(parent)
+        self.pyrometer_app = pyrometer_app
         self.setWindowTitle(title)
         self.setGeometry(200, 150, 900, 700)  # ← remove
         layout = QtWidgets.QVBoxLayout(self)
@@ -109,7 +110,8 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         # --- draw timestamp (top-left) on the pixmap ---
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        temperature = get_pyrometer_temperature()
+        temperature = get_pyrometer_temperature(self.pyrometer_app)
+        # temperature = 'geo'
 
         time_and_temperature_text = ts + '  ' + temperature + 'C'
         p = QtGui.QPainter(pix)
@@ -231,9 +233,10 @@ class LiveViewWorker(_BaseCameraThread):
 # Stream-with-save thread: saves frames at given frequency for duration; keeps preview updated
 # --------------------------------------------------------------------------------------
 class SaveStreamWorker(_BaseCameraThread):
-    def __init__(self, duration_s: float, freq_hz: float, out_dir: str):
+    def __init__(self, pyrometer_app, duration_s: float, freq_hz: float, out_dir: str):
         super().__init__()
         self.duration_s = float(duration_s)
+        self.pyrometer_app = pyrometer_app
         self.freq_hz = float(freq_hz)
         self.out_dir = out_dir
 
@@ -303,7 +306,8 @@ class SaveStreamWorker(_BaseCameraThread):
         ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
         
 
-        temperature = get_pyrometer_temperature()
+        temperature = get_pyrometer_temperature(self.pyrometer_app)
+        # temperature = 'geo'
         print(type(temperature))
         print(temperature)
 
@@ -320,10 +324,12 @@ class SaveStreamWorker(_BaseCameraThread):
 # Main Widget (Controller for buttons and windows)
 # --------------------------------------------------------------------------------------
 class MyWidget(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, pyrometer_app):
         super().__init__()
         self.setWindowTitle("RHEED Control")
         self.resize(600, 320)
+
+        self.pyrometer_app = pyrometer_app
 
         # Buttons
         self.btn_start_live = QtWidgets.QPushButton("Start Live Feed")
@@ -343,7 +349,7 @@ class MyWidget(QtWidgets.QWidget):
         main_layout.addLayout(row)
 
         # Live preview window
-        self.live_window = LiveImageWindow(title="Live RHEED Feed")
+        self.live_window = LiveImageWindow(self.pyrometer_app, title="Live RHEED Feed")
         self.live_window.hide()
 
         # State
@@ -460,7 +466,7 @@ class MyWidget(QtWidgets.QWidget):
         current_time_stream_images_folder = f"./{timestamp}"
         os.makedirs(current_time_stream_images_folder, exist_ok=True)
 
-        self.stream_worker = SaveStreamWorker(duration_s, freq_hz, current_time_stream_images_folder)
+        self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder)
         self._connect_preview(self.stream_worker)
         self.stream_worker.finished.connect(self._on_stream_finished)
         self.stream_worker.start()
@@ -557,7 +563,8 @@ class MyWidget(QtWidgets.QWidget):
     def _save_single_image(self, frame_np: np.ndarray):
         ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
 
-        temperature = get_pyrometer_temperature()
+        temperature = get_pyrometer_temperature(self.pyrometer_app)
+        # temperature = 'geo'
         print(type(temperature))
         print(temperature)
 
@@ -572,11 +579,11 @@ class MyWidget(QtWidgets.QWidget):
 
 
 def main():
-    start_pyrometer()
+    pyrometer_app = start_pyrometer()
     time.sleep(10)
     print('finished setting up pyrometer')
     app = QtWidgets.QApplication(sys.argv)
-    w = MyWidget()
+    w = MyWidget(pyrometer_app)
     w.show()
     sys.exit(app.exec())
 

@@ -1,8 +1,8 @@
 from pywinauto.application import Application
 import time
 
-def get_pyrometer_temperature():
-    app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
+def get_pyrometer_temperature(app):
+    # app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
     # .start(r"C:\Users\Lab10\Desktop\TemperaSure.exe")
     dlg = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
 
@@ -61,3 +61,6 @@ def start_pyrometer():
         print('clicked the start button')
     except:
         print('was unable to click the start button')
+
+    # Return the pyrometer application
+    return app
