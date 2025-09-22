@@ -16,6 +16,7 @@ import numpy as np
 import collections
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
+from layout_colorwidget import Color
 from PyrometerControl import get_pyrometer_temperature, start_pyrometer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -100,18 +101,40 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         # --- Layout: create it WITHOUT a parent, then set once ---
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.setLayout(layout)  # <-- only once
+        # layout.setContentsMargins(0, 0, 0, 0)
+        # layout.setSpacing(8)
 
         # --- Image area ---
         self.image_label = QtWidgets.QLabel()
-        self.image_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
-        self.image_label.setScaledContents(False)
-        self.image_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
-        )
-        layout.addWidget(self.image_label, stretch=2)
+        # self.image_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        # self.image_label.setScaledContents(False)
+        # self.image_label.setSizePolicy(
+        #     QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        # )
+        layout.addWidget(self.image_label)
+
+        
+
+        # Add preloaded image
+        # layout.addWidget(Color('blue'))
+        # layout.addWidget(Color('red'))
+
+        # Matplotlib canvas for intensity plot
+        # self._figure = Figure(figsize=(5, 2))
+        # self._canvas = FigureCanvas(self._figure)
+        # self._axes = self._figure.add_subplot(111)
+        # self._axes.set_title("Live Intensity")
+        # self._axes.set_xlabel("Frame")
+        # self._axes.set_ylabel("Mean Intensity")
+        # self._axes.grid(True, linestyle="--", alpha=0.3)
+        # self._intensity_history = collections.deque(maxlen=300)
+        # (self._intensity_line,) = self._axes.plot([], [], color="tab:orange")
+        # layout.addWidget(self._canvas)
+        print('added canvas to layout')
+        self.setLayout(layout)
+        
+
+
 
 
 
@@ -119,8 +142,8 @@ class LiveImageWindow(QtWidgets.QWidget):
 
     @QtCore.Slot(np.ndarray)
     def update_image(self, image_array: np.ndarray):
-        print(image_array.shape)
-        print(image_array.sum())
+        # print(image_array.shape)
+        # print(image_array.sum())
         pix = ndarray_to_pixmap(image_array)
 
         # --- draw timestamp (top-left) on the pixmap ---
@@ -220,7 +243,15 @@ class LiveViewWorker(_BaseCameraThread):
                 # Frame callback
                 def _handler(c: Camera, s: Stream, f: Frame):
                     c.queue_frame(f)
+                    
                     img = f.as_numpy_ndarray()
+                    print(img.dtype)
+                    if img.dtype != np.uint8:
+                        # Normalize to 8-bit if needed
+                        a_min, a_max = float(img.min()), float(img.max())
+                        if a_max <= a_min:
+                            a_max = a_min + 1.0
+                        img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
                     self._update_latest_frame(img)
                     self.new_frame.emit(img)
 
@@ -287,9 +318,16 @@ class SaveStreamWorker(_BaseCameraThread):
                 def _handler(c: Camera, s: Stream, f: Frame):
                     print('Frame acquired: {}'.format(f), flush=True)
                     c.queue_frame(f)
-                    frame_np = f.as_numpy_ndarray()
-                    self._save_frame(frame_np)      # save immediately
-                    self.new_frame.emit(frame_np)   # update GUI
+                    img = f.as_numpy_ndarray()
+                    if img.dtype != np.uint8:
+                        # Normalize to 8-bit if needed
+                        a_min, a_max = float(img.min()), float(img.max())
+                        if a_max <= a_min:
+                            a_max = a_min + 1.0
+                        img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
+                    print(img.dtype)
+                    self._save_frame(img)      # save immediately
+                    self.new_frame.emit(img)   # update GUI
 
                 cam.start_streaming(_handler)
                 print('Streaming started')
@@ -559,6 +597,13 @@ class MyWidget(QtWidgets.QWidget):
 
                     if frames:
                         img = frames[-1].as_numpy_ndarray()
+                        print(img.dtype)
+                        if img.dtype != np.uint8:
+                            # Normalize to 8-bit if needed
+                            a_min, a_max = float(img.min()), float(img.max())
+                            if a_max <= a_min:
+                                a_max = a_min + 1.0
+                            img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
                         self._save_single_image(img)
                         
                         saved = True
