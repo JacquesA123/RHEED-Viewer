@@ -327,18 +327,19 @@ class SaveStreamWorker(_BaseCameraThread):
         self.pyrometer_app = pyrometer_app
         self.freq_hz = float(freq_hz)
         self.out_dir = out_dir
+        self._frame_counter = 0
 
     def run(self):
         self._set_running(True)
         os.makedirs(self.out_dir, exist_ok=True)
 
-        
+
 
         with VmbSystem.get_instance() as vmb:
-            print('opening acquisition stream camera')
+            print('[SaveStreamWorker] Opening acquisition stream camera')
             cams = vmb.get_all_cameras()
             if not cams:
-                print("No camera found")
+                print('[SaveStreamWorker] No camera found - aborting stream start')
                 return
             cam = cams[0]
 
@@ -348,18 +349,19 @@ class SaveStreamWorker(_BaseCameraThread):
                     cam.TriggerSelector.set('FrameStart')
                     cam.TriggerMode.set('On')
                     cam.AcquisitionMode.set('Continuous')
-                    print('Camera parameters set')
+                    print('[SaveStreamWorker] Camera trigger/acquisition parameters set')
                 except Exception as e:
-                    print(f'Parameter setup failed: {e}')
+                    print(f'[SaveStreamWorker] Parameter setup failed: {e}')
 
                 try:
                     cam.PixelFormat.set('Mono8')
-                    print('Pixel format set')
+                    print('[SaveStreamWorker] Pixel format set to Mono8')
                 except Exception:
                     pass
 
                 def _handler(c: Camera, s: Stream, f: Frame):
-                    print('Frame acquired: {}'.format(f), flush=True)
+                    self._frame_counter += 1
+                    print(f"[SaveStreamWorker] Frame #{self._frame_counter} acquired: {f}", flush=True)
                     c.queue_frame(f)
                     img = f.as_numpy_ndarray()
                     if img.dtype != np.uint8:
@@ -368,18 +370,22 @@ class SaveStreamWorker(_BaseCameraThread):
                         if a_max <= a_min:
                             a_max = a_min + 1.0
                         img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
-                    print(img.dtype)
+                    print(f"[SaveStreamWorker] Frame #{self._frame_counter} dtype: {img.dtype}")
                     self._save_frame(img)      # save immediately
                     self.new_frame.emit(img)   # update GUI
 
+                print(
+                    f"[SaveStreamWorker] Starting streaming with duration={self.duration_s}s, "
+                    f"freq={self.freq_hz}Hz, out_dir='{self.out_dir}'"
+                )
                 cam.start_streaming(_handler)
-                print('Streaming started')
+                print('[SaveStreamWorker] Streaming started - entering trigger loop')
                 # QtCore.QThread.msleep(5)  # warmup
 
                 trigger_period = 1.0 / self.freq_hz
                 next_trigger_t = time.time()
                 end_time = time.time() + self.duration_s
-                
+
 
                 try:
                     while self._is_running() and time.time() < end_time:
@@ -387,24 +393,28 @@ class SaveStreamWorker(_BaseCameraThread):
                         if now >= next_trigger_t:
                             try:
                                 cam.TriggerSoftware.run()
-                                print('Trigger fired', flush=True)
+                                print(
+                                    f"[SaveStreamWorker] Trigger fired at t={now - (end_time - self.duration_s):.3f}s "
+                                    f"(period={trigger_period:.3f}s)",
+                                    flush=True,
+                                )
                             except Exception as e:
-                                print(f'trigger error: {e}', flush=True)
+                                print(f'[SaveStreamWorker] Trigger error: {e}', flush=True)
                             next_trigger_t = now + trigger_period
                             QtCore.QThread.msleep(int(trigger_period * 1000))
                 finally:
                     cam.stop_streaming()
-            print('closing acquisition stream camera')
+            print('[SaveStreamWorker] Closing acquisition stream camera')
 
 
     def _save_frame(self, frame_np: np.ndarray):
         ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-        
+
 
         temperature = get_pyrometer_temperature(self.pyrometer_app)
         # temperature = 'geo'
-        print(type(temperature))
-        print(temperature)
+        print(f"[SaveStreamWorker] Temperature reading type: {type(temperature)}")
+        print(f"[SaveStreamWorker] Temperature reading value: {temperature}")
 
         stream_image_name = temperature + '_' + ts
 
@@ -412,7 +422,7 @@ class SaveStreamWorker(_BaseCameraThread):
 
 
         np.save(fname, frame_np)
-        print('saved stream image')
+        print(f"[SaveStreamWorker] Saved stream image to {fname}")
 
 
 # --------------------------------------------------------------------------------------
@@ -552,6 +562,7 @@ class MyWidget(QtWidgets.QWidget):
         # Ensure live window is visible and receives frames
         if not self.live_window.isVisible():
             self.live_window.show()
+        print(f"[MyWidget] Connecting preview from {worker.__class__.__name__}")
         worker.new_frame.connect(self.live_window.update_image)
         if self.intensity_window is not None:
             self.intensity_window.reset_data()
@@ -573,12 +584,14 @@ class MyWidget(QtWidgets.QWidget):
             self.live_worker.stop()
             self.live_worker.wait()
             self.live_worker = None
+            print('[MyWidget] Stopped live worker prior to starting stream worker')
 
         # Stop previous stream worker if any
         if self.stream_worker is not None:
             self.stream_worker.stop()
             self.stream_worker.wait()
             self.stream_worker = None
+            print('[MyWidget] Stopped existing stream worker before starting new one')
 
         # Start new stream worker
         # make a timestamped folder to save the stream images
@@ -586,6 +599,10 @@ class MyWidget(QtWidgets.QWidget):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         current_time_stream_images_folder = f"./{timestamp}"
         os.makedirs(current_time_stream_images_folder, exist_ok=True)
+        print(
+            f"[MyWidget] Starting stream worker duration={duration_s}s freq={freq_hz}Hz "
+            f"output_dir={current_time_stream_images_folder}"
+        )
 
         self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder)
         self._connect_preview(self.stream_worker)
@@ -600,6 +617,7 @@ class MyWidget(QtWidgets.QWidget):
             self.stream_worker.stop()
             self.stream_worker.wait()
             self.stream_worker = None
+            print('[MyWidget] Stream worker stop requested by user')
         self._on_stream_finished()
         print('stopped acquisition stream')
 
@@ -607,13 +625,16 @@ class MyWidget(QtWidgets.QWidget):
     def _on_stream_finished(self):
         # When a recording stream finishes, return to live preview automatically
         if self.stream_worker is not None:
+            print('[MyWidget] Stream worker finished naturally')
             self.stream_worker = None
         # Resume live preview
         if self.live_worker is None:
+            print('[MyWidget] Restarting live worker after stream finished')
             self.live_worker = LiveViewWorker(target_hz=30.0)
             self._connect_preview(self.live_worker)
             self.live_worker.start()
         self._set_stream_stopped_ui()
+        print('[MyWidget] Stream finished cleanup complete')
 
     @QtCore.Slot()
     def acquire_single_image(self):
