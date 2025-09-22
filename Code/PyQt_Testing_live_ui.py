@@ -120,16 +120,20 @@ class LiveImageWindow(QtWidgets.QWidget):
         # layout.addWidget(Color('red'))
 
         # Matplotlib canvas for intensity plot
-        # self._figure = Figure(figsize=(5, 2))
-        # self._canvas = FigureCanvas(self._figure)
-        # self._axes = self._figure.add_subplot(111)
-        # self._axes.set_title("Live Intensity")
-        # self._axes.set_xlabel("Frame")
-        # self._axes.set_ylabel("Mean Intensity")
-        # self._axes.grid(True, linestyle="--", alpha=0.3)
-        # self._intensity_history = collections.deque(maxlen=300)
-        # (self._intensity_line,) = self._axes.plot([], [], color="tab:orange")
-        # layout.addWidget(self._canvas)
+        self._figure = Figure(figsize=(5, 2), constrained_layout=True)
+        self._canvas = FigureCanvas(self._figure)
+        self._canvas.setParent(self)
+        self._axes = self._figure.add_subplot(111)
+        self._axes.set_title("Live Intensity")
+        self._axes.set_xlabel("Frame")
+        self._axes.set_ylabel("Mean Intensity")
+        self._axes.grid(True, linestyle="--", alpha=0.3)
+        self._intensity_history = collections.deque(maxlen=300)
+        self._frame_index = 0
+        (self._intensity_line,) = self._axes.plot([], [], color="tab:orange")
+        self._axes.set_ylim(0, 255)
+        self._axes.set_xlim(0, 1)
+        layout.addWidget(self._canvas)
         print('added canvas to layout')
         self.setLayout(layout)
         
@@ -172,6 +176,39 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         self.image_label.setPixmap(pix)
         self.image_label.resize(pix.size())
+
+        self._update_intensity_plot(image_array)
+
+    def _update_intensity_plot(self, image_array: np.ndarray):
+        mean_intensity = float(np.mean(image_array))
+        self._intensity_history.append(mean_intensity)
+        self._frame_index += 1
+
+        y = np.fromiter(self._intensity_history, dtype=float)
+        history_len = len(y)
+        if history_len:
+            start_idx = max(0, self._frame_index - history_len)
+            x = np.arange(start_idx, start_idx + history_len)
+        else:
+            x = np.array([])
+
+        self._intensity_line.set_data(x, y)
+
+        if history_len > 0:
+            y_min = float(np.min(y))
+            y_max = float(np.max(y))
+            pad = max(1.0, (y_max - y_min) * 0.1)
+            lower = max(0.0, y_min - pad)
+            upper = min(255.0, y_max + pad)
+            if lower == upper:
+                upper = lower + 1.0
+            self._axes.set_ylim(lower, upper)
+            self._axes.set_xlim(start_idx, max(start_idx + 1, self._frame_index))
+        else:
+            self._axes.set_xlim(0, 1)
+            self._axes.set_ylim(0, 1)
+
+        self._canvas.draw_idle()
         
 
 
