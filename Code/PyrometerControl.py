@@ -54,7 +54,7 @@ def start_pyrometer():
     except Exception:
         print('was not able to click the ok button')
         pass
-    time.sleep(4)
+    time.sleep(1)
     # Try to click start button
     try:
         main.child_window(title="Start", control_type="Button").click_input()

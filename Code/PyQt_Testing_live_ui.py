@@ -21,6 +21,8 @@ from PyrometerControl import get_pyrometer_temperature, start_pyrometer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+
 
 
 # Default save locations (replace with your actual paths)
@@ -86,6 +88,14 @@ class StreamSettingsDialog(QtWidgets.QDialog):
             return None, None
 
 
+class MplCanvas(FigureCanvas):
+
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        self.parent = parent
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(111)
+        super().__init__(fig)
+
 # --------------------------------------------------------------------------------------
 # Window that shows the live RHEED feed (grayscale image)
 # --------------------------------------------------------------------------------------
@@ -113,25 +123,10 @@ class LiveImageWindow(QtWidgets.QWidget):
         # )
         layout.addWidget(self.image_label)
 
-        
 
-        # Add preloaded image
-        # layout.addWidget(Color('blue'))
-        # layout.addWidget(Color('red'))
 
-        # Matplotlib canvas for intensity plot
-        # self._figure = Figure(figsize=(5, 2))
-        # self._canvas = FigureCanvas(self._figure)
-        # self._axes = self._figure.add_subplot(111)
-        # self._axes.set_title("Live Intensity")
-        # self._axes.set_xlabel("Frame")
-        # self._axes.set_ylabel("Mean Intensity")
-        # self._axes.grid(True, linestyle="--", alpha=0.3)
-        # self._intensity_history = collections.deque(maxlen=300)
-        # (self._intensity_line,) = self._axes.plot([], [], color="tab:orange")
-        # layout.addWidget(self._canvas)
-        print('added canvas to layout')
         self.setLayout(layout)
+        print('added widget to layout and set layout')
         
 
 
@@ -150,7 +145,7 @@ class LiveImageWindow(QtWidgets.QWidget):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         temperature = get_pyrometer_temperature(self.pyrometer_app)
         # temperature = 'geo'
-
+        print('finished first third of updating image')
         time_and_temperature_text = ts + '  ' + temperature + 'C'
         p = QtGui.QPainter(pix)
         p.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -158,7 +153,7 @@ class LiveImageWindow(QtWidgets.QWidget):
         font = QtGui.QFont("DejaVu Sans Mono", 12)
         font.setStyleHint(QtGui.QFont.TypeWriter)
         p.setFont(font)
-
+        print('finished second third of updating image')
         metrics = QtGui.QFontMetrics(font)
         bg_rect = metrics.boundingRect(time_and_temperature_text).adjusted(-6, -4, +6, +4)
         bg_rect.moveTopLeft(QtCore.QPoint(5, 5))  # small margin from top-left
@@ -172,6 +167,7 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         self.image_label.setPixmap(pix)
         self.image_label.resize(pix.size())
+        print('finished last third of updating image')
         
 
 
@@ -639,7 +635,7 @@ class MyWidget(QtWidgets.QWidget):
 
 def main():
     pyrometer_app = start_pyrometer()
-    time.sleep(5)
+    time.sleep(3)
     print('finished setting up pyrometer')
     app = QtWidgets.QApplication(sys.argv)
     w = MyWidget(pyrometer_app)
