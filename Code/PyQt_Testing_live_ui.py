@@ -11,17 +11,21 @@ import time
 import os
 import datetime
 import threading
-
+import plotly.express as px
+import pandas as pd
 import numpy as np
-import collections
+import queue
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
 from layout_colorwidget import Color
 from PyrometerControl import get_pyrometer_temperature, start_pyrometer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-
+from GetOscillationPlot import obtain_pixmap
+import matplotlib
+matplotlib.use("Agg")
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from GetOscillationPlot import plotly_figure_to_qpixmap
 
 
 
@@ -30,6 +34,49 @@ single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHE
 stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Stream Images")
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
+
+
+# add near your imports
+import queue
+
+class PlotSaver(QtCore.QThread):
+    """Runs Plotly/Kaleido image exports off the GUI thread, throttled."""
+    def __init__(self, max_fps=1, parent=None):
+        super().__init__(parent)
+        self.q = queue.Queue(maxsize=2)   # small buffer to apply backpressure
+        self._running = True
+        self._min_interval = 1.0 / max(0.1, float(max_fps))
+        self._last = 0.0
+
+    def submit(self, x, y, path):
+        try:
+            self.q.put_nowait((np.asarray(x), np.asarray(y), path))
+        except queue.Full:
+            pass  # drop if we’re behind
+
+    def stop(self):
+        self._running = False
+        try: self.q.put_nowait(None)
+        except queue.Full: pass
+        self.wait()
+
+    def run(self):
+        import time
+        import plotly.express as px
+        while self._running:
+            item = self.q.get()
+            if item is None:
+                break
+            x, y, path = item
+            now = time.time()
+            if now - self._last < self._min_interval:
+                continue
+            self._last = now
+            try:
+                fig = px.line(x=x, y=y, labels={'x':'x', 'y':'sin(x)'}, title="Sine Wave")
+                fig.write_image(path, width=800, height=500, scale=1)
+            except Exception as e:
+                print("plot save error:", e)
 
 
 # --------------------------------------------------------------------------------------
@@ -88,14 +135,6 @@ class StreamSettingsDialog(QtWidgets.QDialog):
             return None, None
 
 
-class MplCanvas(FigureCanvas):
-
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
-        self.parent = parent
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = fig.add_subplot(111)
-        super().__init__(fig)
-
 # --------------------------------------------------------------------------------------
 # Window that shows the live RHEED feed (grayscale image)
 # --------------------------------------------------------------------------------------
@@ -107,7 +146,7 @@ class LiveImageWindow(QtWidgets.QWidget):
         self.pyrometer_app = pyrometer_app
 
         self.setWindowTitle(title)
-        self.resize(900, 700)  # use resize instead of setGeometry for a top-level
+        self.resize(656, 492)  # use resize instead of setGeometry for a top-level
 
         # --- Layout: create it WITHOUT a parent, then set once ---
         layout = QtWidgets.QVBoxLayout()
@@ -116,17 +155,16 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         # --- Image area ---
         self.image_label = QtWidgets.QLabel()
-        # self.image_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
-        # self.image_label.setScaledContents(False)
-        # self.image_label.setSizePolicy(
-        #     QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
-        # )
+        self.test_image = QtWidgets.QLabel()
+        # self.test_image.setPixmap(QtGui.QPixmap(r"C:\Users\Lab10\Pictures\Screenshots\Screenshot (1).png"))
         layout.addWidget(self.image_label)
+        layout.addWidget(self.test_image)
+
 
 
 
         self.setLayout(layout)
-        print('added widget to layout and set layout')
+       
         
 
 
@@ -137,37 +175,52 @@ class LiveImageWindow(QtWidgets.QWidget):
 
     @QtCore.Slot(np.ndarray)
     def update_image(self, image_array: np.ndarray):
-        # print(image_array.shape)
-        # print(image_array.sum())
+
         pix = ndarray_to_pixmap(image_array)
 
         # --- draw timestamp (top-left) on the pixmap ---
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         temperature = get_pyrometer_temperature(self.pyrometer_app)
-        # temperature = 'geo'
-        print('finished first third of updating image')
+
+
         time_and_temperature_text = ts + '  ' + temperature + 'C'
-        p = QtGui.QPainter(pix)
+        p = QtGui.QPainter(pix) # Creates a QPainter bound to the pixmap, so you can draw text or graphics onto the pixmap
         p.setRenderHint(QtGui.QPainter.TextAntialiasing)
 
+        # Pixmap text overlay settings
         font = QtGui.QFont("DejaVu Sans Mono", 12)
         font.setStyleHint(QtGui.QFont.TypeWriter)
         p.setFont(font)
-        print('finished second third of updating image')
+
+        # Creates a rectangle for the text to reside in
         metrics = QtGui.QFontMetrics(font)
         bg_rect = metrics.boundingRect(time_and_temperature_text).adjusted(-6, -4, +6, +4)
         bg_rect.moveTopLeft(QtCore.QPoint(5, 5))  # small margin from top-left
 
-        # semi-transparent background for readability
+        # semi-transparent background in the rectangle for readability
         p.fillRect(bg_rect, QtGui.QColor(0, 0, 0, 160))
         p.setPen(QtCore.Qt.white)
         p.drawText(bg_rect.left() + 6, bg_rect.top() + 4 + metrics.ascent(), time_and_temperature_text)
-        p.end()
+        p.end() # Finalizes the drawing operations on the pixmap
         # --- end timestamp overlay ---
 
-        self.image_label.setPixmap(pix)
-        self.image_label.resize(pix.size())
-        print('finished last third of updating image')
+        self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
+        self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
+
+    @QtCore.Slot(Figure)
+    def figure_to_pixmap(fig: Figure) -> QtGui.QPixmap:
+        """Render a Matplotlib Figure to QPixmap."""
+        canvas = FigureCanvas(fig)             # temporary canvas
+        print('initialized canvas')
+        canvas.draw()
+        print('drew canvas')
+        buf, (w, h) = canvas.print_to_buffer()
+        qimage = QtGui.QImage(
+            buf, w, h, QtGui.QImage.Format_RGBA8888
+        )
+        print('initialized qimage')
+        return QtGui.QPixmap.fromImage(qimage)
+
         
 
 
@@ -241,7 +294,7 @@ class LiveViewWorker(_BaseCameraThread):
                     c.queue_frame(f)
                     
                     img = f.as_numpy_ndarray()
-                    print(img.dtype)
+                    # print(img.dtype)
                     if img.dtype != np.uint8:
                         # Normalize to 8-bit if needed
                         a_min, a_max = float(img.min()), float(img.max())
@@ -321,7 +374,7 @@ class SaveStreamWorker(_BaseCameraThread):
                         if a_max <= a_min:
                             a_max = a_min + 1.0
                         img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
-                    print(img.dtype)
+                    # print(img.dtype)
                     self._save_frame(img)      # save immediately
                     self.new_frame.emit(img)   # update GUI
 
@@ -377,7 +430,7 @@ class MyWidget(QtWidgets.QWidget):
         self.setWindowTitle("RHEED Control")
         self.resize(600, 320)
 
-        self.pyrometer_app = pyrometer_app
+        self.pyrometer_app = pyrometer_app # Will be passed as a function parameter to allow pyrometer control (i.e. accessing the temperature)
 
         # Buttons
         self.btn_start_live = QtWidgets.QPushButton("Start Live Feed")
@@ -414,6 +467,16 @@ class MyWidget(QtWidgets.QWidget):
         # Initial UI state
         self._set_initial_ui()
 
+        # start saver (e.g., 1 PNG per second)
+        self.plot_saver = PlotSaver(max_fps=1, parent=self)
+        self.plot_saver.start()
+
+        # snapshot timer (don’t do it every frame!)
+        self.snapshot_timer = QtCore.QTimer(self)
+        self.snapshot_timer.setInterval(1000)  # ms
+        self.snapshot_timer.timeout.connect(self._snapshot_plot)
+        self.snapshot_timer.start()
+
     # ----------------- UI state helpers -----------------
     def _set_initial_ui(self):
         # Only "Start Live Feed" visible
@@ -443,6 +506,22 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_stop_live.setEnabled(True)
         self.btn_start_stream.setVisible(True)
         self.btn_stop_stream.setVisible(False)
+
+    def closeEvent(self, e):
+        # cleanly stop worker
+        if hasattr(self, "plot_saver") and self.plot_saver is not None:
+            self.plot_saver.stop()
+        super().closeEvent(e)
+
+    @QtCore.Slot()
+    def _snapshot_plot(self):
+        # build your data quickly on GUI thread
+        x = np.linspace(0, 2*np.pi, 500)
+        y = np.sin(x)
+        ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        out = os.path.join(stream_images_folder, f"sine_{ts}.png")
+        # hand off heavy work to the saver thread
+        self.plot_saver.submit(x, y, out)
 
     # ----------------- Button handlers -----------------
     @QtCore.Slot()
@@ -593,7 +672,7 @@ class MyWidget(QtWidgets.QWidget):
 
                     if frames:
                         img = frames[-1].as_numpy_ndarray()
-                        print(img.dtype)
+                        # print(img.dtype)
                         if img.dtype != np.uint8:
                             # Normalize to 8-bit if needed
                             a_min, a_max = float(img.min()), float(img.max())

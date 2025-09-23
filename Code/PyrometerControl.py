@@ -35,7 +35,7 @@ def start_pyrometer():
 
     print('starting BASF pyrometer software')
     app = Application(backend='uia').start(r"C:\Users\Lab10\Desktop\TemperaSure.exe")
-    time.sleep(6)
+    time.sleep(2)
     main = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
     # dlg = app.window(title="Port setup") 
     # main.print_control_identifiers()

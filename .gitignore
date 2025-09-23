@@ -3,6 +3,7 @@ ECHO is on.
 *.npy
 *.log
 *.pyc
+*.png
 
 venv/
 Acquiring Images Via Python Script Tests/
