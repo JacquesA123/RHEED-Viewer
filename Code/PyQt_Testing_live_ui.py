@@ -26,6 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from GetOscillationPlot import plotly_figure_to_qpixmap
+import pyqtgraph
 
 
 
@@ -202,10 +203,16 @@ class LiveImageWindow(QtWidgets.QWidget):
         p.setPen(QtCore.Qt.white)
         p.drawText(bg_rect.left() + 6, bg_rect.top() + 4 + metrics.ascent(), time_and_temperature_text)
         p.end() # Finalizes the drawing operations on the pixmap
-        # --- end timestamp overlay ---
+        
 
         self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
         self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
+
+        # Show the plot
+        plot_path = r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Stream Images\sine_2025-09-24_09-12-37-632123.png"
+        plot_pixmap = QtGui.QPixmap(plot_path)
+        self.test_image.setPixmap(plot_pixmap)
+        self.image_label.resize(plot_pixmap.size())
 
     @QtCore.Slot(Figure)
     def figure_to_pixmap(fig: Figure) -> QtGui.QPixmap:
@@ -262,8 +269,9 @@ class _BaseCameraThread(QtCore.QThread):
 # Live view thread: displays frames continuously, DOES NOT SAVE
 # --------------------------------------------------------------------------------------
 class LiveViewWorker(_BaseCameraThread):
-    def __init__(self, target_hz: float = 30.0):
+    def __init__(self, target_hz: float):
         super().__init__()
+        print(float(target_hz))
         self.target_hz = float(target_hz)
 
     def run(self):
@@ -536,7 +544,7 @@ class MyWidget(QtWidgets.QWidget):
             self.live_worker = None
 
         # Start live worker
-        self.live_worker = LiveViewWorker(target_hz=30.0)
+        self.live_worker = LiveViewWorker(target_hz=1.0)
         self.live_worker.new_frame.connect(self.live_window.update_image)
         self.live_window.show()
         self.live_worker.start()
@@ -616,7 +624,7 @@ class MyWidget(QtWidgets.QWidget):
             self.stream_worker = None
         # Resume live preview
         if self.live_worker is None:
-            self.live_worker = LiveViewWorker(target_hz=30.0)
+            self.live_worker = LiveViewWorker(target_hz=1.0)
             self._connect_preview(self.live_worker)
             self.live_worker.start()
         self._set_stream_stopped_ui()
