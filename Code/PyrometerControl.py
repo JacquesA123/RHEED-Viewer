@@ -48,8 +48,7 @@ def start_pyrometer():
     # dlg["OK"].click()
 
     try:
-        port.set_focus()
-        port.type_keys("{ENTER}")
+        port.child_window(title="OK", control_type="Button").click()
         print('clicked the ok button')
     except Exception:
         print('was not able to click the ok button')
@@ -57,7 +56,7 @@ def start_pyrometer():
     time.sleep(1)
     # Try to click start button
     try:
-        main.child_window(title="Start", control_type="Button").click_input()
+        main.child_window(title="Start", control_type="Button").click()
         print('clicked the start button')
     except:
         print('was unable to click the start button')

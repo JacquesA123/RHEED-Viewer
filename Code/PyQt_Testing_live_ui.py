@@ -14,7 +14,6 @@ import threading
 import plotly.express as px
 import pandas as pd
 import numpy as np
-import queue
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
 from layout_colorwidget import Color
@@ -36,48 +35,6 @@ stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHE
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
 
-
-# add near your imports
-import queue
-
-class PlotSaver(QtCore.QThread):
-    """Runs Plotly/Kaleido image exports off the GUI thread, throttled."""
-    def __init__(self, max_fps=1, parent=None):
-        super().__init__(parent)
-        self.q = queue.Queue(maxsize=2)   # small buffer to apply backpressure
-        self._running = True
-        self._min_interval = 1.0 / max(0.1, float(max_fps))
-        self._last = 0.0
-
-    def submit(self, x, y, path):
-        try:
-            self.q.put_nowait((np.asarray(x), np.asarray(y), path))
-        except queue.Full:
-            pass  # drop if we’re behind
-
-    def stop(self):
-        self._running = False
-        try: self.q.put_nowait(None)
-        except queue.Full: pass
-        self.wait()
-
-    def run(self):
-        import time
-        import plotly.express as px
-        while self._running:
-            item = self.q.get()
-            if item is None:
-                break
-            x, y, path = item
-            now = time.time()
-            if now - self._last < self._min_interval:
-                continue
-            self._last = now
-            try:
-                fig = px.line(x=x, y=y, labels={'x':'x', 'y':'sin(x)'}, title="Sine Wave")
-                fig.write_image(path, width=800, height=500, scale=1)
-            except Exception as e:
-                print("plot save error:", e)
 
 
 # --------------------------------------------------------------------------------------
@@ -135,7 +92,6 @@ class StreamSettingsDialog(QtWidgets.QDialog):
         except ValueError:
             return None, None
 
-
 # --------------------------------------------------------------------------------------
 # Window that shows the live RHEED feed (grayscale image)
 # --------------------------------------------------------------------------------------
@@ -147,7 +103,7 @@ class LiveImageWindow(QtWidgets.QWidget):
         self.pyrometer_app = pyrometer_app
 
         self.setWindowTitle(title)
-        self.resize(656, 492)  # use resize instead of setGeometry for a top-level
+        self.resize(1600, 1200)  # use resize instead of setGeometry for a top-level
 
         # --- Layout: create it WITHOUT a parent, then set once ---
         layout = QtWidgets.QVBoxLayout()
@@ -156,10 +112,23 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         # --- Image area ---
         self.image_label = QtWidgets.QLabel()
-        self.test_image = QtWidgets.QLabel()
+        # self.test_image = QtWidgets.QLabel()
         # self.test_image.setPixmap(QtGui.QPixmap(r"C:\Users\Lab10\Pictures\Screenshots\Screenshot (1).png"))
         layout.addWidget(self.image_label)
-        layout.addWidget(self.test_image)
+        # layout.addWidget(self.test_image)
+
+        # --- Live intensity plot ---
+        self.plot_widget = pyqtgraph.PlotWidget()
+        self.plot_widget.setLabel("left", "Intensity")
+        self.plot_widget.setLabel("bottom", "Time", units="s")
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+        self.intensity_curve = self.plot_widget.plot(pen=pyqtgraph.mkPen(color="y", width=2))
+        layout.addWidget(self.plot_widget)
+
+        # Data containers for the intensity time series
+        self._intensity_time = []
+        self._intensity_values = []
+        self._start_time = time.monotonic()
 
 
 
@@ -208,11 +177,27 @@ class LiveImageWindow(QtWidgets.QWidget):
         self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
         self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
 
-        # Show the plot
-        plot_path = r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Stream Images\sine_2025-09-24_09-12-37-632123.png"
-        plot_pixmap = QtGui.QPixmap(plot_path)
-        self.test_image.setPixmap(plot_pixmap)
-        self.image_label.resize(plot_pixmap.size())
+        # Update intensity vs time plot using the incoming frame
+        elapsed = time.monotonic() - self._start_time
+        intensity = float(np.asarray(image_array, dtype=np.float64).sum())
+        print(intensity)
+
+        self._intensity_time.append(elapsed)
+        self._intensity_values.append(intensity)
+
+        max_points = 600
+        if len(self._intensity_time) > max_points:
+            self._intensity_time.pop(0)
+            self._intensity_values.pop(0)
+
+        self.intensity_curve.setData(self._intensity_time, self._intensity_values)
+
+    def reset_intensity_plot(self):
+        """Clear the stored intensity history and restart the timer baseline."""
+        self._intensity_time.clear()
+        self._intensity_values.clear()
+        self._start_time = time.monotonic()
+        self.intensity_curve.clear()
 
     @QtCore.Slot(Figure)
     def figure_to_pixmap(fig: Figure) -> QtGui.QPixmap:
@@ -475,15 +460,7 @@ class MyWidget(QtWidgets.QWidget):
         # Initial UI state
         self._set_initial_ui()
 
-        # start saver (e.g., 1 PNG per second)
-        self.plot_saver = PlotSaver(max_fps=1, parent=self)
-        self.plot_saver.start()
-
-        # snapshot timer (don’t do it every frame!)
-        self.snapshot_timer = QtCore.QTimer(self)
-        self.snapshot_timer.setInterval(1000)  # ms
-        self.snapshot_timer.timeout.connect(self._snapshot_plot)
-        self.snapshot_timer.start()
+       
 
     # ----------------- UI state helpers -----------------
     def _set_initial_ui(self):
@@ -516,21 +493,10 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_stop_stream.setVisible(False)
 
     def closeEvent(self, e):
-        # cleanly stop worker
-        if hasattr(self, "plot_saver") and self.plot_saver is not None:
-            self.plot_saver.stop()
+        
         super().closeEvent(e)
 
-    @QtCore.Slot()
-    def _snapshot_plot(self):
-        # build your data quickly on GUI thread
-        x = np.linspace(0, 2*np.pi, 500)
-        y = np.sin(x)
-        ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-        out = os.path.join(stream_images_folder, f"sine_{ts}.png")
-        # hand off heavy work to the saver thread
-        self.plot_saver.submit(x, y, out)
-
+    
     # ----------------- Button handlers -----------------
     @QtCore.Slot()
     def start_live_feed(self):
@@ -546,6 +512,7 @@ class MyWidget(QtWidgets.QWidget):
         # Start live worker
         self.live_worker = LiveViewWorker(target_hz=1.0)
         self.live_worker.new_frame.connect(self.live_window.update_image)
+        self.live_window.reset_intensity_plot()
         self.live_window.show()
         self.live_worker.start()
         print('starting live viewing stream')
@@ -602,6 +569,7 @@ class MyWidget(QtWidgets.QWidget):
         os.makedirs(current_time_stream_images_folder, exist_ok=True)
 
         self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder)
+        self.live_window.reset_intensity_plot()
         self._connect_preview(self.stream_worker)
         self.stream_worker.finished.connect(self._on_stream_finished)
         self.stream_worker.start()
@@ -625,6 +593,7 @@ class MyWidget(QtWidgets.QWidget):
         # Resume live preview
         if self.live_worker is None:
             self.live_worker = LiveViewWorker(target_hz=1.0)
+            self.live_window.reset_intensity_plot()
             self._connect_preview(self.live_worker)
             self.live_worker.start()
         self._set_stream_stopped_ui()
