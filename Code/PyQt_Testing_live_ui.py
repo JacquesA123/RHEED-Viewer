@@ -98,10 +98,12 @@ class StreamSettingsDialog(QtWidgets.QDialog):
 
 
 class LiveImageWindow(QtWidgets.QWidget):
-    def __init__(self, pyrometer_app, intensity_rectangle, title="Live RHEED Feed", parent=None):
+    def __init__(self, pyrometer_app, intensity_rectangle: QtCore.QRect | None = None, title="Live RHEED Feed", parent=None):
         super().__init__(parent)
         self.pyrometer_app = pyrometer_app
-        self.intensity_rectangle = [0, 0, 0, 0]
+        if intensity_rectangle is not None and intensity_rectangle.isNull():
+            intensity_rectangle = None
+        self._intensity_rect: QtCore.QRect | None = intensity_rectangle.normalized() if intensity_rectangle is not None else None
         self.setWindowTitle(title)
         self.resize(1600, 1200)  # use resize instead of setGeometry for a top-level
 
@@ -134,18 +136,28 @@ class LiveImageWindow(QtWidgets.QWidget):
 
 
         self.setLayout(layout)
-       
-        
 
 
 
 
 
 
+
+
+
+    def set_intensity_rectangle(self, rect: QtCore.QRect | None):
+        """Update the rectangle used for intensity calculations and reset the plot."""
+        if rect is not None:
+            rect = rect.normalized()
+            if rect.isNull() or rect.width() <= 0 or rect.height() <= 0:
+                rect = None
+        self._intensity_rect = rect
+        self.reset_intensity_plot()
 
     @QtCore.Slot(np.ndarray)
     def update_image(self, image_array: np.ndarray):
 
+        image_array = np.asarray(image_array)
         pix = ndarray_to_pixmap(image_array)
 
         # --- draw timestamp (top-left) on the pixmap ---
@@ -174,25 +186,42 @@ class LiveImageWindow(QtWidgets.QWidget):
         p.end() # Finalizes the drawing operations on the pixmap
         
 
+        rect = self._intensity_rect
+        intensity: float | None = None
+
+        if rect is not None:
+            painter = QtGui.QPainter(pix)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
+            pen = QtGui.QPen(QtGui.QColor(0, 255, 0))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawRect(rect)
+            painter.end()
+
+            height, width = image_array.shape[0], image_array.shape[1]
+            x0 = max(0, rect.x())
+            y0 = max(0, rect.y())
+            x1 = min(width, rect.x() + rect.width())
+            y1 = min(height, rect.y() + rect.height())
+
+            if x1 > x0 and y1 > y0:
+                sub_rectangle = image_array[y0:y1, x0:x1]
+                intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
+
         self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
         self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
 
-        # Update intensity vs time plot using the incoming frame
-        elapsed = time.monotonic() - self._start_time
-        sub_rectangle = image_array[rect.y(): rect.y() + rect.height(),
-                  rect.x(): rect.x() + rect.width()]
-        intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
-        print(intensity)
+        if intensity is not None:
+            elapsed = time.monotonic() - self._start_time
+            self._intensity_time.append(elapsed)
+            self._intensity_values.append(intensity)
 
-        self._intensity_time.append(elapsed)
-        self._intensity_values.append(intensity)
+            max_points = 15000
+            if len(self._intensity_time) > max_points:
+                self._intensity_time.pop(0)
+                self._intensity_values.pop(0)
 
-        max_points = 15000
-        if len(self._intensity_time) > max_points:
-            self._intensity_time.pop(0)
-            self._intensity_values.pop(0)
-
-        self.intensity_curve.setData(self._intensity_time, self._intensity_values)
+            self.intensity_curve.setData(self._intensity_time, self._intensity_values)
 
     def reset_intensity_plot(self):
         """Clear the stored intensity history and restart the timer baseline."""
@@ -596,6 +625,7 @@ class MyWidget(QtWidgets.QWidget):
         # State
         self.live_worker: LiveViewWorker | None = None
         self.stream_worker: SaveStreamWorker | None = None
+        self.selected_rect: QtCore.QRect | None = None
 
         # Connections
         self.btn_start_live.clicked.connect(self.start_live_feed)
@@ -694,16 +724,17 @@ class MyWidget(QtWidgets.QWidget):
     @QtCore.Slot()
     def open_oscillation_settings_dialog(self):
         dlg = SelectRegionReferenceFileTemplate(self)
-        # dlg.regionApplied.connect(self._on_region_applied)
+        dlg.regionSelected.connect(self._on_reference_region_selected)
         dlg.exec()
-    
-    @QtCore.Slot(QtCore.QRect)
-    def _on_region_applied(self, rect: QtCore.QRect):
-        self.selected_rect = rect
-        # Optionally, show feedback
+
+    @QtCore.Slot(QtCore.QRect, str)
+    def _on_reference_region_selected(self, rect: QtCore.QRect, image_path: str):
+        self.selected_rect = rect.normalized()
+        self.live_window.set_intensity_rectangle(self.selected_rect)
         QtWidgets.QMessageBox.information(
-            self, "Region set",
-            f"Rect: x={rect.x()}, y={rect.y()}, w={rect.width()}, h={rect.height()}"
+            self,
+            "Region set",
+            f"Rect: x={rect.x()}, y={rect.y()}, w={rect.width()}, h={rect.height()}\nSource: {image_path}"
         )
     
     def _connect_preview(self, worker: _BaseCameraThread):
