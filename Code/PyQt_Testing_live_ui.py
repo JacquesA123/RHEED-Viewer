@@ -185,7 +185,7 @@ class LiveImageWindow(QtWidgets.QWidget):
         self._intensity_time.append(elapsed)
         self._intensity_values.append(intensity)
 
-        max_points = 600
+        max_points = 15000
         if len(self._intensity_time) > max_points:
             self._intensity_time.pop(0)
             self._intensity_values.pop(0)
