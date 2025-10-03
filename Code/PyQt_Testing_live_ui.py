@@ -29,9 +29,9 @@ import pyqtgraph
 
 
 
-# Default save locations (replace with your actual paths)
-single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Single Images")
-stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\RHEED Viewer\Acquiring Images Via Python Script Tests\Stream Images")
+# Image saving locations
+single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Single Images")
+stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Stream Images")
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
 
@@ -98,10 +98,10 @@ class StreamSettingsDialog(QtWidgets.QDialog):
 
 
 class LiveImageWindow(QtWidgets.QWidget):
-    def __init__(self, pyrometer_app, title="Live RHEED Feed", parent=None):
+    def __init__(self, pyrometer_app, intensity_rectangle, title="Live RHEED Feed", parent=None):
         super().__init__(parent)
         self.pyrometer_app = pyrometer_app
-
+        self.intensity_rectangle = [0, 0, 0, 0]
         self.setWindowTitle(title)
         self.resize(1600, 1200)  # use resize instead of setGeometry for a top-level
 
@@ -179,7 +179,9 @@ class LiveImageWindow(QtWidgets.QWidget):
 
         # Update intensity vs time plot using the incoming frame
         elapsed = time.monotonic() - self._start_time
-        intensity = float(np.asarray(image_array, dtype=np.float64).sum())
+        sub_rectangle = image_array[rect.y(): rect.y() + rect.height(),
+                  rect.x(): rect.x() + rect.width()]
+        intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
         print(intensity)
 
         self._intensity_time.append(elapsed)
@@ -248,6 +250,149 @@ class _BaseCameraThread(QtCore.QThread):
     def latest_frame(self):
         with self._lock:
             return None if self._latest_frame is None else self._latest_frame.copy()
+ 
+class SelectRegionReferenceFileTemplate(QtWidgets.QDialog):
+    """Dialog where the user pastes a file path into a textbox and clicks OK.
+       After that, opens RegionDialog to select a rectangle."""
+    regionSelected = QtCore.Signal(QtCore.QRect, str)  # emits (rect, image_path)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Enter Reference Image Path")
+        self.selected_region = None
+        self.selected_image_path = None
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Label + textbox for file path
+        self.path_edit = QtWidgets.QLineEdit()
+        self.path_edit.setPlaceholderText("Paste image file path here...")
+        layout.addWidget(self.path_edit)
+
+        # Buttons
+        btns = QtWidgets.QHBoxLayout()
+        self.ok_btn = QtWidgets.QPushButton("OK")
+        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        btns.addWidget(self.ok_btn)
+        btns.addWidget(self.cancel_btn)
+        layout.addLayout(btns)
+
+        # Connect signals
+        self.ok_btn.clicked.connect(self.on_ok_clicked)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    @QtCore.Slot()
+    def on_ok_clicked(self):
+        file_path = self.path_edit.text().strip()
+        file_path = file_path.strip('"').strip("'")
+        if not file_path:
+            QtWidgets.QMessageBox.warning(self, "No Path", "Please paste a file path first.")
+            return
+        if not QtCore.QFile.exists(file_path):
+            QtWidgets.QMessageBox.critical(self, "Invalid Path", f"File not found:\n{file_path}")
+            return
+
+        # Launch region dialog with the provided path
+        region_dialog = RegionDialog(file_path, self)
+        if region_dialog.exec() == QtWidgets.QDialog.Accepted:
+            rect = region_dialog.get_selected_rect()
+            if rect is not None and not rect.isNull():
+                self.selected_region = rect
+                self.selected_image_path = file_path
+                self.regionSelected.emit(rect, file_path)
+                print("User selected region:", rect, "on", file_path)
+            self.accept()
+
+
+# ---------- Dialog to set the oscillation region (uses image path) ----------
+class RegionDialog(QtWidgets.QDialog):
+    regionApplied = QtCore.Signal(QtCore.QRect)
+
+    def __init__(self, image_path: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Set Region")
+        self._last_rect = QtCore.QRect()
+
+        v = QtWidgets.QVBoxLayout(self)
+
+        # Load the chosen image from disk
+        numpy_image = np.load(image_path)
+        converted_image = ndarray_to_pixmap(numpy_image)
+        pm = QtGui.QPixmap(converted_image)
+        if pm.isNull():
+            QtWidgets.QMessageBox.critical(self, "Error", f"Could not load image:\n{image_path}")
+            self.reject()
+            return
+
+        # 1:1 pixels selector
+        self.selector = RegionSelectLabel(pm)
+        v.addWidget(self.selector, alignment=QtCore.Qt.AlignCenter)
+
+        # Info + buttons
+        v.addWidget(QtWidgets.QLabel("Drag to select a rectangle. Click 'Apply region' to save."))
+
+        btns = QtWidgets.QHBoxLayout()
+        self.apply_btn = QtWidgets.QPushButton("Apply region")
+        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        btns.addWidget(self.apply_btn)
+        btns.addWidget(self.cancel_btn)
+        v.addLayout(btns)
+
+        # Signals
+        self.selector.regionSelected.connect(self._on_region_changed)
+        self.apply_btn.clicked.connect(self._on_apply)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    @QtCore.Slot(QtCore.QRect)
+    def _on_region_changed(self, rect: QtCore.QRect):
+        self._last_rect = rect.normalized()
+
+    @QtCore.Slot()
+    def _on_apply(self):
+        if self._last_rect.isNull() or self._last_rect.width() == 0 or self._last_rect.height() == 0:
+            QtWidgets.QMessageBox.information(self, "No selection", "Please drag to select a region first.")
+            return
+        self.regionApplied.emit(self._last_rect)
+        self.accept()
+
+    def get_selected_rect(self) -> QtCore.QRect | None:
+        return self._last_rect if not self._last_rect.isNull() else None
+
+
+# ---------- Widget to select a rectangular region on a fixed-size QLabel ----------
+class RegionSelectLabel(QtWidgets.QLabel):
+    regionSelected = QtCore.Signal(QtCore.QRect)
+
+    def __init__(self, pixmap: QtGui.QPixmap, parent=None):
+        super().__init__(parent)
+        self.setPixmap(pixmap)
+        self.setFixedSize(pixmap.size())  # 1:1 pixels (no scaling)
+        self.setMouseTracking(True)
+        self._rubber = QtWidgets.QRubberBand(QtWidgets.QRubberBand.Rectangle, self)
+        self._origin = None
+        self._current_rect = QtCore.QRect()
+
+    def mousePressEvent(self, e: QtGui.QMouseEvent):
+        if e.button() == QtCore.Qt.LeftButton:
+            self._origin = e.pos()
+            self._current_rect = QtCore.QRect(self._origin, QtCore.QSize())
+            self._rubber.setGeometry(self._current_rect)
+            self._rubber.show()
+
+    def mouseMoveEvent(self, e: QtGui.QMouseEvent):
+        if self._origin is not None:
+            self._current_rect = QtCore.QRect(self._origin, e.pos()).normalized()
+            self._rubber.setGeometry(self._current_rect)
+
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent):
+        if e.button() == QtCore.Qt.LeftButton and self._origin is not None:
+            self._current_rect = QtCore.QRect(self._origin, e.pos()).normalized()
+            self._rubber.setGeometry(self._current_rect)
+            self.regionSelected.emit(self._current_rect)
+            self._origin = None
+
+    def currentRect(self) -> QtCore.QRect:
+        return self._current_rect.normalized()
 
 
 # --------------------------------------------------------------------------------------
@@ -386,7 +531,7 @@ class SaveStreamWorker(_BaseCameraThread):
                         if now >= next_trigger_t:
                             try:
                                 cam.TriggerSoftware.run()
-                                print('Trigger fired', flush=True)
+                                # print('Trigger fired', flush=True)
                             except Exception as e:
                                 print(f'trigger error: {e}', flush=True)
                             next_trigger_t = now + trigger_period
@@ -411,7 +556,7 @@ class SaveStreamWorker(_BaseCameraThread):
 
 
         np.save(fname, frame_np)
-        print('saved stream image')
+        # print('saved stream image')
 
 
 # --------------------------------------------------------------------------------------
@@ -431,6 +576,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire = QtWidgets.QPushButton("Acquire RHEED Image")
         self.btn_start_stream = QtWidgets.QPushButton("Start RHEED Stream")
         self.btn_stop_stream = QtWidgets.QPushButton("Stop RHEED Stream")
+        self.btn_oscillation_settings = QtWidgets.QPushButton("Oscillation Settings")
 
         # Layout
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -440,6 +586,7 @@ class MyWidget(QtWidgets.QWidget):
         row.addWidget(self.btn_acquire)
         row.addWidget(self.btn_start_stream)
         row.addWidget(self.btn_stop_stream)
+        row.addWidget(self.btn_oscillation_settings)
         main_layout.addLayout(row)
 
         # Live preview window
@@ -456,6 +603,7 @@ class MyWidget(QtWidgets.QWidget):
         self.btn_acquire.clicked.connect(self.acquire_single_image)
         self.btn_start_stream.clicked.connect(self.open_stream_dialog)
         self.btn_stop_stream.clicked.connect(self.stop_rheed_stream)
+        self.btn_oscillation_settings.clicked.connect(self.open_oscillation_settings_dialog)
 
         # Initial UI state
         self._set_initial_ui()
@@ -466,6 +614,7 @@ class MyWidget(QtWidgets.QWidget):
     def _set_initial_ui(self):
         # Only "Start Live Feed" visible
         self.btn_start_live.setVisible(True)
+        self.btn_oscillation_settings.setVisible(True)
         self.btn_stop_live.setVisible(False)
         self.btn_acquire.setVisible(False)
         self.btn_start_stream.setVisible(False)
@@ -474,6 +623,7 @@ class MyWidget(QtWidgets.QWidget):
     def _set_live_ui(self):
         # After starting live: show stop + acquire + start-stream
         self.btn_start_live.setVisible(False)
+        self.btn_oscillation_settings.setVisible(False)
         self.btn_stop_live.setVisible(True)
         self.btn_acquire.setVisible(True)
         self.btn_start_stream.setVisible(True)
@@ -541,6 +691,21 @@ class MyWidget(QtWidgets.QWidget):
                 return
             self.start_rheed_stream(duration, freq)
 
+    @QtCore.Slot()
+    def open_oscillation_settings_dialog(self):
+        dlg = SelectRegionReferenceFileTemplate(self)
+        # dlg.regionApplied.connect(self._on_region_applied)
+        dlg.exec()
+    
+    @QtCore.Slot(QtCore.QRect)
+    def _on_region_applied(self, rect: QtCore.QRect):
+        self.selected_rect = rect
+        # Optionally, show feedback
+        QtWidgets.QMessageBox.information(
+            self, "Region set",
+            f"Rect: x={rect.x()}, y={rect.y()}, w={rect.width()}, h={rect.height()}"
+        )
+    
     def _connect_preview(self, worker: _BaseCameraThread):
         # Ensure live window is visible and receives frames
         if not self.live_window.isVisible():
@@ -676,8 +841,8 @@ class MyWidget(QtWidgets.QWidget):
 
         temperature = get_pyrometer_temperature(self.pyrometer_app)
         # temperature = 'geo'
-        print(type(temperature))
-        print(temperature)
+        # print(type(temperature))
+        # print(temperature)
 
         image_name = temperature + '_' + ts
 
