@@ -207,6 +207,7 @@ class LiveImageWindow(QtWidgets.QWidget):
             if x1 > x0 and y1 > y0:
                 sub_rectangle = image_array[y0:y1, x0:x1]
                 intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
+                print(f'intensity = {intensity}')
 
         self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
         self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
@@ -576,8 +577,8 @@ class SaveStreamWorker(_BaseCameraThread):
 
         temperature = get_pyrometer_temperature(self.pyrometer_app)
         # temperature = 'geo'
-        print(type(temperature))
-        print(temperature)
+        # print(type(temperature))
+        # print(f'temperature = {temperature}')
 
         stream_image_name = temperature + '_' + ts
 
@@ -873,7 +874,7 @@ class MyWidget(QtWidgets.QWidget):
         temperature = get_pyrometer_temperature(self.pyrometer_app)
         # temperature = 'geo'
         # print(type(temperature))
-        # print(temperature)
+        print(f'temperature = {temperature}')
 
         image_name = temperature + '_' + ts
 
