@@ -30,8 +30,12 @@ import pyqtgraph
 
 
 # Image saving locations
-single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Single Images")
-stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Stream Images")
+# single_images_folder = os.path.expanduser(r"C:\Jacques RHEED\RHEED Images\Single Images") # Oxide MBE
+# stream_images_folder = os.path.expanduser(r"C:\Jacques RHEED\RHEED Images\Stream Images") # Oxide MBE
+single_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025")
+
+stream_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025")
+
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
 
