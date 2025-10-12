@@ -592,6 +592,37 @@ class SaveStreamWorker(_BaseCameraThread):
         np.save(fname, frame_np)
         # print('saved stream image')
 
+        # # print('saved stream image')
+
+        # # Build string for the filename
+        # grower_initials = 'JA' # Specified in pop up window right before starting the RHEED stream
+
+        # date_and_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        # print(f'date_and_time is {date_and_time}')
+        # date = date_and_time[2:10]
+        # print(f'date is {date}')
+        # hyphen = '-'
+        # date_with_no_hyphens= date.replace(hyphen, "")
+        # print(str(date_with_no_hyphens))
+
+        # growth_identification_letter = 'A' # Specified in pop up window right before starting the RHEED stream
+
+        # temperature = get_pyrometer_temperature(self.pyrometer_app) + 'C'
+
+        # time = date_and_time[11:19]
+
+        # hyphen = '-'
+        # time_with_no_hyphens= time.replace(hyphen, "")
+        # print(time_with_no_hyphens)
+
+        # # Put it all together
+
+        # stream_image_name = grower_initials + date_with_no_hyphens + growth_identification_letter + '_' + temperature + '_' + time_with_no_hyphens
+        # fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
+        # np.save(fname, frame_np)
+
+        
+
 
 # --------------------------------------------------------------------------------------
 # Main Widget (Controller for buttons and windows)
