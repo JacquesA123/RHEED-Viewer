@@ -31,11 +31,11 @@ import pyqtgraph
 
 
 # Image saving locations
-# single_images_folder = os.path.expanduser(r"C:\Jacques RHEED\RHEED Images\Single Images") # Oxide MBE
-# stream_images_folder = os.path.expanduser(r"C:\Jacques RHEED\RHEED Images\Stream Images") # Oxide MBE
-single_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025")
+single_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Single Images") # Oxide MBE
+stream_images_folder = os.path.expanduser(r"C:\Users\Lab10\Desktop\Automated RHEED Image Acquisition\Acquiring Images Via Python Script Tests\Stream Images") # Oxide MBE
+# single_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025") # Calc MBE
 
-stream_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025")
+# stream_images_folder = os.path.expanduser(r"C:\Dropbox\Data\RHEED\RHEED_YangGroup\FeSeTe_STO\10_03_2025") # Calc MBE
 
 os.makedirs(single_images_folder, exist_ok=True)
 os.makedirs(stream_images_folder, exist_ok=True)
@@ -663,50 +663,50 @@ class SaveStreamWorker(_BaseCameraThread):
 
 
     def _save_frame(self, frame_np: np.ndarray):
-        ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        # ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
         
 
-        temperature = get_pyrometer_temperature(self.pyrometer_app)
-        # temperature = 'geo'
-        # print(type(temperature))
-        # print(f'temperature = {temperature}')
+        # temperature = get_pyrometer_temperature(self.pyrometer_app)
+        # # temperature = 'geo'
+        # # print(type(temperature))
+        # # print(f'temperature = {temperature}')
 
-        stream_image_name = temperature + '_' + ts
+        # stream_image_name = temperature + '_' + ts
 
-        fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
+        # fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
 
 
-        np.save(fname, frame_np)
+        # np.save(fname, frame_np)
         # print('saved stream image')
 
-        # # print('saved stream image')
+        # print('saved stream image')
 
-        # # Build string for the filename
-        # grower_initials = 'JA' # Specified in pop up window right before starting the RHEED stream
+        # Build string for the filename
+        grower_initials = 'JA' # Specified in pop up window right before starting the RHEED stream
 
-        # date_and_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-        # print(f'date_and_time is {date_and_time}')
-        # date = date_and_time[2:10]
-        # print(f'date is {date}')
-        # hyphen = '-'
-        # date_with_no_hyphens= date.replace(hyphen, "")
-        # print(str(date_with_no_hyphens))
+        date_and_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        print(f'date_and_time is {date_and_time}')
+        date = date_and_time[2:10]
+        print(f'date is {date}')
+        hyphen = '-'
+        date_with_no_hyphens= date.replace(hyphen, "")
+        print(str(date_with_no_hyphens))
 
-        # growth_identification_letter = 'A' # Specified in pop up window right before starting the RHEED stream
+        growth_identification_letter = 'A' # Specified in pop up window right before starting the RHEED stream
 
-        # temperature = get_pyrometer_temperature(self.pyrometer_app) + 'C'
+        temperature = get_pyrometer_temperature(self.pyrometer_app) + 'C'
 
-        # time = date_and_time[11:19]
+        time = date_and_time[11:19]
 
-        # hyphen = '-'
-        # time_with_no_hyphens= time.replace(hyphen, "")
-        # print(time_with_no_hyphens)
+        hyphen = '-'
+        time_with_no_hyphens= time.replace(hyphen, "")
+        print(time_with_no_hyphens)
 
-        # # Put it all together
+        # Put it all together
 
-        # stream_image_name = grower_initials + date_with_no_hyphens + growth_identification_letter + '_' + temperature + '_' + time_with_no_hyphens
-        # fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
-        # np.save(fname, frame_np)
+        stream_image_name = grower_initials + date_with_no_hyphens + growth_identification_letter + '_' + temperature + '_' + time_with_no_hyphens
+        fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
+        np.save(fname, frame_np)
 
         
 
