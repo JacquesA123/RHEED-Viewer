@@ -4,7 +4,9 @@ import time
 def get_pyrometer_temperature(app):
     # app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
     # .start(r"C:\Users\Lab10\Desktop\TemperaSure.exe")
-    dlg = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
+    # dlg = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode') # For Oxide MBE
+    dlg = app.window(title = r'BASF TemperaSure 5.7.0.4') # For Calcogenide MBE
+
 
     # Print all controls recursively
     # dlg.print_control_identifiers()
@@ -26,7 +28,8 @@ def get_pyrometer_temperature(app):
 def start_pyrometer():
 
     try:
-        app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
+        # app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode') # For Oxide MBE
+        app = Application(backend='uia').connect(title = r'BASF TemperaSure 5.7.0.4') # For Calcogenide MBE
         # time.sleep(1)
         app.kill()
         print('killed existing pyrometer window')
@@ -34,12 +37,17 @@ def start_pyrometer():
         print('BASF Pyrometer software currently not running')
 
     print('starting BASF pyrometer software')
-    app = Application(backend='uia').start(r"C:\Users\Lab10\Desktop\TemperaSure.exe")
+    # app = Application(backend='uia').start(r"C:\Users\Lab10\Desktop\TemperaSure.exe") # For the Oxide MBE computer
+    app = Application(backend='uia').start(r"C:\Users\Omicron\Desktop\TemperaSure.exe") # For the Calcogenide MBE computer
+
     time.sleep(2)
-    main = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode')
+    # main = app.window(title = r'BASF TemperaSure 5.7.0.4 Advanced Mode') # For Oxide MBE
+    main = app.window(title = r'BASF TemperaSure 5.7.0.4') # For Calcogenide
     # dlg = app.window(title="Port setup") 
     # main.print_control_identifiers()
     port = main.child_window(title="Port setup", control_type="Window")
+    port.print_control_identifiers()
+    time.sleep(2)
     # dlg = app.window(title="Port setup")  
     # dlg.wait("visible enabled", timeout=2)
 
