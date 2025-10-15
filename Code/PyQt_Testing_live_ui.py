@@ -17,7 +17,8 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from vmbpy import VmbSystem, Camera, Stream, Frame
 from layout_colorwidget import Color
-from PyrometerControl import get_pyrometer_temperature, start_pyrometer
+# from PyrometerControl import get_pyrometer_temperature, start_pyrometer
+from PyrometerControlOxideMbe import get_pyrometer_temperature, start_pyrometer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from GetOscillationPlot import obtain_pixmap
@@ -44,23 +45,53 @@ os.makedirs(stream_images_folder, exist_ok=True)
 # --------------------------------------------------------------------------------------
 # Utility: convert numpy 2D array (grayscale) to QPixmap
 # --------------------------------------------------------------------------------------
+# def ndarray_to_pixmap(arr: np.ndarray) -> QtGui.QPixmap:
+#     arr = np.asarray(arr)
+#     if arr.ndim > 2:
+#         arr = arr.squeeze()
+#     if arr.dtype != np.uint8:
+#         # Normalize to 8-bit if needed
+#         a_min, a_max = float(arr.min()), float(arr.max())
+#         if a_max <= a_min:
+#             a_max = a_min + 1.0
+#         arr = ((arr - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
+
+#     h, w = arr.shape
+#     bytes_per_line = w
+#     qimage = QtGui.QImage(arr.data, w, h, bytes_per_line, QtGui.QImage.Format_Grayscale8)
+#     # Important: keep a copy so the data isn't freed after function returns
+#     qimage = qimage.copy()
+#     return QtGui.QPixmap.fromImage(qimage)
+
+
 def ndarray_to_pixmap(arr: np.ndarray) -> QtGui.QPixmap:
     arr = np.asarray(arr)
     if arr.ndim > 2:
         arr = arr.squeeze()
+
+    # Normalize non-uint8 to 8-bit
     if arr.dtype != np.uint8:
-        # Normalize to 8-bit if needed
         a_min, a_max = float(arr.min()), float(arr.max())
         if a_max <= a_min:
             a_max = a_min + 1.0
         arr = ((arr - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
 
-    h, w = arr.shape
-    bytes_per_line = w
-    qimage = QtGui.QImage(arr.data, w, h, bytes_per_line, QtGui.QImage.Format_Grayscale8)
-    # Important: keep a copy so the data isn't freed after function returns
-    qimage = qimage.copy()
-    return QtGui.QPixmap.fromImage(qimage)
+    if arr.ndim == 2:
+        # Grayscale
+        h, w = arr.shape
+        qimage = QtGui.QImage(arr.data, w, h, w, QtGui.QImage.Format_Grayscale8)
+        qimage = qimage.copy()
+        return QtGui.QPixmap.fromImage(qimage)
+    elif arr.ndim == 3 and arr.shape[2] == 3:
+        # RGB
+        h, w, _ = arr.shape
+        bytes_per_line = 3 * w
+        qimage = QtGui.QImage(arr.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)
+        qimage = qimage.copy()
+        return QtGui.QPixmap.fromImage(qimage)
+    else:
+        raise ValueError(f"Unsupported array shape for pixmap: {arr.shape}")
+
 
 
 # --------------------------------------------------------------------------------------
@@ -209,9 +240,18 @@ class LiveImageWindow(QtWidgets.QWidget):
             y1 = min(height, rect.y() + rect.height())
 
             if x1 > x0 and y1 > y0:
+                # sub_rectangle = image_array[y0:y1, x0:x1]
+                # intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
+                # print(f'intensity = {intensity}')
+
                 sub_rectangle = image_array[y0:y1, x0:x1]
-                intensity = float(np.asarray(sub_rectangle, dtype=np.float64).sum())
-                print(f'intensity = {intensity}')
+                # NEW: pick grayscale or green channel for intensity
+                if sub_rectangle.ndim == 3 and sub_rectangle.shape[2] == 3:
+                    sub_gray = sub_rectangle[..., 1]  # green channel
+                else:
+                    sub_gray = sub_rectangle
+                intensity = float(np.asarray(sub_gray, dtype=np.float64).sum())
+
 
         self.image_label.setPixmap(pix) # Update the QLabel widget with the new pixmap (image)
         self.image_label.resize(pix.size()) # Resize the label so the window fits the pixmap size exactly
@@ -465,16 +505,43 @@ class LiveViewWorker(_BaseCameraThread):
                 def _handler(c: Camera, s: Stream, f: Frame):
                     c.queue_frame(f)
                     
+                    # img = f.as_numpy_ndarray()
+                    # # print(img.dtype)
+                    # if img.dtype != np.uint8:
+                    #     # Normalize to 8-bit if needed
+                    #     a_min, a_max = float(img.min()), float(img.max())
+                    #     if a_max <= a_min:
+                    #         a_max = a_min + 1.0
+                    #     img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
+                    # self._update_latest_frame(img)
+                    # self.new_frame.emit(img)
+
                     img = f.as_numpy_ndarray()
-                    # print(img.dtype)
+
+                    # Squeeze any trailing singleton channel, e.g. (H,W,1) -> (H,W)
+                    img = np.squeeze(img)
+
+                    # Normalize to 8-bit if needed
                     if img.dtype != np.uint8:
-                        # Normalize to 8-bit if needed
                         a_min, a_max = float(img.min()), float(img.max())
                         if a_max <= a_min:
                             a_max = a_min + 1.0
                         img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
-                    self._update_latest_frame(img)
-                    self.new_frame.emit(img)
+
+                    # Build RGB with green channel carrying intensity
+                    h, w = img.shape[:2]           # <-- key change (handles 2D or 3D safely)
+                    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+                    if img.ndim == 2:
+                        rgb[..., 1] = img
+                    else:
+                        # if somehow (H,W,1) slipped through, take that one channel
+                        rgb[..., 1] = img[..., 0]
+
+                    # (Optional but safer with recycled frame buffers)
+                    rgb = rgb.copy()
+
+                    self._update_latest_frame(rgb)
+                    self.new_frame.emit(rgb)
 
                 cam.start_streaming(_handler)
                 period = 1.0 / max(self.target_hz, 1.0)
@@ -539,16 +606,36 @@ class SaveStreamWorker(_BaseCameraThread):
                 def _handler(c: Camera, s: Stream, f: Frame):
                     print('Frame acquired: {}'.format(f), flush=True)
                     c.queue_frame(f)
+                    # img = f.as_numpy_ndarray()
+                    # if img.dtype != np.uint8:
+                    #     # Normalize to 8-bit if needed
+                    #     a_min, a_max = float(img.min()), float(img.max())
+                    #     if a_max <= a_min:
+                    #         a_max = a_min + 1.0
+                    #     img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
+                    # # print(img.dtype)
+                    # self._save_frame(img)      # save immediately
+                    # self.new_frame.emit(img)   # update GUI
                     img = f.as_numpy_ndarray()
+                    img = np.squeeze(img)
+
                     if img.dtype != np.uint8:
-                        # Normalize to 8-bit if needed
                         a_min, a_max = float(img.min()), float(img.max())
                         if a_max <= a_min:
                             a_max = a_min + 1.0
                         img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
-                    # print(img.dtype)
-                    self._save_frame(img)      # save immediately
-                    self.new_frame.emit(img)   # update GUI
+
+                    h, w = img.shape[:2]
+                    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+                    if img.ndim == 2:
+                        rgb[..., 1] = img
+                    else:
+                        rgb[..., 1] = img[..., 0]
+
+                    rgb = rgb.copy()
+
+                    self._save_frame(rgb)     # save RGB .npy
+                    self.new_frame.emit(rgb)  # update GUI
 
                 cam.start_streaming(_handler)
                 print('Streaming started')
@@ -888,7 +975,13 @@ class MyWidget(QtWidgets.QWidget):
                             if a_max <= a_min:
                                 a_max = a_min + 1.0
                             img = ((img - a_min) / (a_max - a_min) * 255.0).astype(np.uint8)
-                        self._save_single_image(img)
+                        
+                        # after producing uint8 'img' (shape HxW)
+                        h, w = img.shape
+                        rgb = np.zeros((h, w, 3), dtype=np.uint8)
+                        rgb[..., 1] = img
+                        self._save_single_image(rgb)
+                        # self._save_single_image(img)
                         
                         saved = True
                 print('closing single image camera')
