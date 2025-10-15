@@ -109,8 +109,19 @@ class StreamSettingsDialog(QtWidgets.QDialog):
         self.frequency_input = QtWidgets.QLineEdit(self)
         self.frequency_input.setPlaceholderText("Enter image frequency in Hz")
 
+        self.grower_initials_input = QtWidgets.QLineEdit(self)
+        self.grower_initials_input.setPlaceholderText("Enter the grower's initials (must be two letters)")
+
+        self.growth_identification_letter = QtWidgets.QLineEdit(self)
+        self.growth_identification_letter.setPlaceholderText("Enter the growth identification letter (must be one letter)")
+
         layout.addRow("Stream Duration (seconds):", self.duration_input)
         layout.addRow("Image Frequency (Hz):", self.frequency_input)
+        layout.addRow("Grower's initials:", self.grower_initials_input)
+        layout.addRow("Growth identification letter:", self.growth_identification_letter)
+
+
+        
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
@@ -123,7 +134,10 @@ class StreamSettingsDialog(QtWidgets.QDialog):
         try:
             duration = float(self.duration_input.text())
             frequency = float(self.frequency_input.text())
-            return duration, frequency
+            grower_initials = str(self.grower_initials_input.text())
+            growth_identification_letter = str(self.growth_identification_letter.text())
+
+            return duration, frequency, grower_initials, growth_identification_letter
         except ValueError:
             return None, None
 
@@ -566,12 +580,14 @@ class LiveViewWorker(_BaseCameraThread):
 # Stream-with-save thread: saves frames at given frequency for duration; keeps preview updated
 # --------------------------------------------------------------------------------------
 class SaveStreamWorker(_BaseCameraThread):
-    def __init__(self, pyrometer_app, duration_s: float, freq_hz: float, out_dir: str):
+    def __init__(self, pyrometer_app, duration_s: float, freq_hz: float, out_dir: str, grower_initials: str, growth_identification_letter: str):
         super().__init__()
         self.duration_s = float(duration_s)
         self.pyrometer_app = pyrometer_app
         self.freq_hz = float(freq_hz)
         self.out_dir = out_dir
+        self.grower_initials = grower_initials
+        self.growth_identification_letter = growth_identification_letter
 
     def run(self):
         self._set_running(True)
@@ -682,7 +698,7 @@ class SaveStreamWorker(_BaseCameraThread):
         # print('saved stream image')
 
         # Build string for the filename
-        grower_initials = 'JA' # Specified in pop up window right before starting the RHEED stream
+        # grower_initials = 'JA' # Specified in pop up window right before starting the RHEED stream
 
         date_and_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
         print(f'date_and_time is {date_and_time}')
@@ -692,7 +708,7 @@ class SaveStreamWorker(_BaseCameraThread):
         date_with_no_hyphens= date.replace(hyphen, "")
         print(str(date_with_no_hyphens))
 
-        growth_identification_letter = 'A' # Specified in pop up window right before starting the RHEED stream
+        # growth_identification_letter = 'A' # Specified in pop up window right before starting the RHEED stream
 
         temperature = get_pyrometer_temperature(self.pyrometer_app) + 'C'
 
@@ -704,7 +720,7 @@ class SaveStreamWorker(_BaseCameraThread):
 
         # Put it all together
 
-        stream_image_name = grower_initials + date_with_no_hyphens + growth_identification_letter + '_' + temperature + '_' + time_with_no_hyphens
+        stream_image_name = self.grower_initials + date_with_no_hyphens + self.growth_identification_letter + '_' + temperature + '_' + time_with_no_hyphens
         fname = os.path.join(self.out_dir, f"{stream_image_name}.npy")
         np.save(fname, frame_np)
 
@@ -838,11 +854,11 @@ class MyWidget(QtWidgets.QWidget):
     def open_stream_dialog(self):
         dlg = StreamSettingsDialog(self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
-            duration, freq = dlg.get_values()
+            duration, freq, growth_initials, growth_identification_letter = dlg.get_values()
             if duration is None or freq is None or duration <= 0 or freq <= 0:
                 QtWidgets.QMessageBox.warning(self, "Invalid Input", "Please enter positive numeric values.")
                 return
-            self.start_rheed_stream(duration, freq)
+            self.start_rheed_stream(duration, freq, growth_initials, growth_identification_letter)
 
     @QtCore.Slot()
     def open_oscillation_settings_dialog(self):
@@ -867,7 +883,7 @@ class MyWidget(QtWidgets.QWidget):
         worker.new_frame.connect(self.live_window.update_image)
 
     @QtCore.Slot()
-    def start_rheed_stream(self, duration_s: float, freq_hz: float):
+    def start_rheed_stream(self, duration_s: float, freq_hz: float, grower_initials: str, growth_identification_letter: str):
         # Stop live worker (the stream worker will also update the preview)
         if self.live_worker is not None:
             self.live_worker.stop()
@@ -887,7 +903,7 @@ class MyWidget(QtWidgets.QWidget):
         current_time_stream_images_folder = f"./{timestamp}"
         os.makedirs(current_time_stream_images_folder, exist_ok=True)
 
-        self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder)
+        self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder, grower_initials, growth_identification_letter)
         self.live_window.reset_intensity_plot()
         self._connect_preview(self.stream_worker)
         self.stream_worker.finished.connect(self._on_stream_finished)
