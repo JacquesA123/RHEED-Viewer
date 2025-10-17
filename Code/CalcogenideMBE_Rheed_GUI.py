@@ -115,10 +115,14 @@ class StreamSettingsDialog(QtWidgets.QDialog):
         self.growth_identification_letter = QtWidgets.QLineEdit(self)
         self.growth_identification_letter.setPlaceholderText("Enter the growth identification letter (must be one letter)")
 
+        self.exposure_time_input = QtWidgets.QLineEdit(self)
+        self.exposure_time_input.setPlaceholderText("Enter exposure time in microseconds")
+
         layout.addRow("Stream Duration (seconds):", self.duration_input)
         layout.addRow("Image Frequency (Hz):", self.frequency_input)
         layout.addRow("Grower's initials:", self.grower_initials_input)
         layout.addRow("Growth identification letter:", self.growth_identification_letter)
+        layout.addRow("Exposure time (µs):", self.exposure_time_input)
 
 
         
@@ -136,10 +140,11 @@ class StreamSettingsDialog(QtWidgets.QDialog):
             frequency = float(self.frequency_input.text())
             grower_initials = str(self.grower_initials_input.text())
             growth_identification_letter = str(self.growth_identification_letter.text())
+            exposure_time_us = float(self.exposure_time_input.text())
 
-            return duration, frequency, grower_initials, growth_identification_letter
+            return duration, frequency, grower_initials, growth_identification_letter, exposure_time_us
         except ValueError:
-            return None, None
+            return None, None, None, None, None
 
 # --------------------------------------------------------------------------------------
 # Window that shows the live RHEED feed (grayscale image)
@@ -580,7 +585,7 @@ class LiveViewWorker(_BaseCameraThread):
 # Stream-with-save thread: saves frames at given frequency for duration; keeps preview updated
 # --------------------------------------------------------------------------------------
 class SaveStreamWorker(_BaseCameraThread):
-    def __init__(self, pyrometer_app, duration_s: float, freq_hz: float, out_dir: str, grower_initials: str, growth_identification_letter: str):
+    def __init__(self, pyrometer_app, duration_s: float, freq_hz: float, out_dir: str, grower_initials: str, growth_identification_letter: str, exposure_time_us: float):
         super().__init__()
         self.duration_s = float(duration_s)
         self.pyrometer_app = pyrometer_app
@@ -588,6 +593,7 @@ class SaveStreamWorker(_BaseCameraThread):
         self.out_dir = out_dir
         self.grower_initials = grower_initials
         self.growth_identification_letter = growth_identification_letter
+        self.exposure_time_us = float(exposure_time_us)
 
     def run(self):
         self._set_running(True)
@@ -609,6 +615,11 @@ class SaveStreamWorker(_BaseCameraThread):
                     cam.TriggerSelector.set('FrameStart')
                     cam.TriggerMode.set('On')
                     cam.AcquisitionMode.set('Continuous')
+                    try:
+                        cam.ExposureTimeAbs.set(self.exposure_time_us)
+                        print(f'Exposure time set to {self.exposure_time_us} µs')
+                    except Exception as e:
+                        print(f'Exposure time setup failed: {e}')
                     print('Camera parameters set')
                 except Exception as e:
                     print(f'Parameter setup failed: {e}')
@@ -765,6 +776,7 @@ class MyWidget(QtWidgets.QWidget):
         self.live_worker: LiveViewWorker | None = None
         self.stream_worker: SaveStreamWorker | None = None
         self.selected_rect: QtCore.QRect | None = None
+        self.current_exposure_time_us: float = 100000.0
 
         # Connections
         self.btn_start_live.clicked.connect(self.start_live_feed)
@@ -853,12 +865,21 @@ class MyWidget(QtWidgets.QWidget):
     @QtCore.Slot()
     def open_stream_dialog(self):
         dlg = StreamSettingsDialog(self)
+        dlg.exposure_time_input.setText(str(self.current_exposure_time_us))
         if dlg.exec() == QtWidgets.QDialog.Accepted:
-            duration, freq, growth_initials, growth_identification_letter = dlg.get_values()
-            if duration is None or freq is None or duration <= 0 or freq <= 0:
+            duration, freq, growth_initials, growth_identification_letter, exposure_time_us = dlg.get_values()
+            if (
+                duration is None
+                or freq is None
+                or exposure_time_us is None
+                or duration <= 0
+                or freq <= 0
+                or exposure_time_us <= 0
+            ):
                 QtWidgets.QMessageBox.warning(self, "Invalid Input", "Please enter positive numeric values.")
                 return
-            self.start_rheed_stream(duration, freq, growth_initials, growth_identification_letter)
+            self.current_exposure_time_us = exposure_time_us
+            self.start_rheed_stream(duration, freq, growth_initials, growth_identification_letter, exposure_time_us)
 
     @QtCore.Slot()
     def open_oscillation_settings_dialog(self):
@@ -883,7 +904,7 @@ class MyWidget(QtWidgets.QWidget):
         worker.new_frame.connect(self.live_window.update_image)
 
     @QtCore.Slot()
-    def start_rheed_stream(self, duration_s: float, freq_hz: float, grower_initials: str, growth_identification_letter: str):
+    def start_rheed_stream(self, duration_s: float, freq_hz: float, grower_initials: str, growth_identification_letter: str, exposure_time_us: float):
         # Stop live worker (the stream worker will also update the preview)
         if self.live_worker is not None:
             self.live_worker.stop()
@@ -903,7 +924,15 @@ class MyWidget(QtWidgets.QWidget):
         current_time_stream_images_folder = f"./{timestamp}"
         os.makedirs(current_time_stream_images_folder, exist_ok=True)
 
-        self.stream_worker = SaveStreamWorker(self.pyrometer_app, duration_s, freq_hz, current_time_stream_images_folder, grower_initials, growth_identification_letter)
+        self.stream_worker = SaveStreamWorker(
+            self.pyrometer_app,
+            duration_s,
+            freq_hz,
+            current_time_stream_images_folder,
+            grower_initials,
+            growth_identification_letter,
+            exposure_time_us,
+        )
         self.live_window.reset_intensity_plot()
         self._connect_preview(self.stream_worker)
         self.stream_worker.finished.connect(self._on_stream_finished)
@@ -966,6 +995,11 @@ class MyWidget(QtWidgets.QWidget):
                         cam.TriggerSelector.set('FrameStart')
                         cam.TriggerMode.set('On')
                         cam.AcquisitionMode.set('Continuous')
+                        try:
+                            cam.ExposureTimeAbs.set(self.current_exposure_time_us)
+                            print(f'single image exposure set to {self.current_exposure_time_us} µs')
+                        except Exception as e:
+                            print(f'Failed to set single image exposure: {e}')
                     except Exception:
                         pass
 
