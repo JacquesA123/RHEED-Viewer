@@ -512,9 +512,11 @@ class LiveViewWorker(_BaseCameraThread):
                     cam.TriggerSelector.set('FrameStart')
                     cam.TriggerMode.set('On')
                     cam.AcquisitionMode.set('Continuous')
+
                 except Exception:
                     pass
-
+                
+                
                 # Frame callback
                 def _handler(c: Camera, s: Stream, f: Frame):
                     c.queue_frame(f)

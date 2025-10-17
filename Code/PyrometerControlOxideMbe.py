@@ -46,7 +46,7 @@ def start_pyrometer():
     # dlg = app.window(title="Port setup") 
     # main.print_control_identifiers()
     port = main.child_window(title="Port setup", control_type="Window")
-    port.print_control_identifiers()
+    # port.print_control_identifiers()
     time.sleep(2)
     # dlg = app.window(title="Port setup")  
     # dlg.wait("visible enabled", timeout=2)
